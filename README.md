@@ -1,2 +1,2 @@
 # Mobile Shiftlock
-A better mobile shiftlock implementation with physics parity for Roblox.
+A better mobile shiftlock implementation with physics parity to PC for Roblox.
