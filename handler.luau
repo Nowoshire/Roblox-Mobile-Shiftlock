@@ -64,7 +64,7 @@ end
 --[[
 	Enables or disables shiftlock.
 ]]
-local function enableShiftlock(enable: boolean?)
+local function enableShiftLock(enable: boolean?)
 	if enable then
 		UserGameSettings.RotationType = Enum.RotationType.CameraRelative
 
@@ -90,7 +90,7 @@ shiftlockButton.Activated:Connect(function()
 	end
 	
 	-- Toggle shiftlock
-	enableShiftlock(not isShiftLockActive())
+	enableShiftLock(not isShiftLockActive())
 end)
 
 --[[
@@ -121,7 +121,7 @@ local function updateGuiVisibility()
 		
 		-- Prevent the player from getting stuck in shiftlock
 		if isShiftLockActive() then
-			enableShiftlock(false)
+			enableShiftLock(false)
 		end
 	end
 end
