@@ -11,27 +11,25 @@
 
 --!nonstrict
 
+local FIRST_PERSON_DISTANCE_THRESHOLD = 1 -- Distance from subject that is considered first person, value from PlayerModule
 local OFF_ICON_ASSETURL = "rbxasset://textures/ui/mouseLock_off@2x.png"
 local ON_ICON_ASSETURL = "rbxasset://textures/ui/mouseLock_on@2x.png"
-local DEFAULT_CAMERA_OFFSET = Vector3.new(1.75, 0, 0) -- value used by MouseLockController
+local DEFAULT_CAMERA_OFFSET = Vector3.new(1.75, 0, 0) -- Camera offset in Shiftlock, value from PlayerModule
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local UserGameSettings = UserSettings().GameSettings
 
 local localPlayer = Players.LocalPlayer :: Player
-local playerScripts = localPlayer.PlayerScripts :: typeof(game:GetService("StarterPlayer").StarterPlayerScripts) -- allows typechecker to resolve the require if a fork exists in StarterPlayerScripts
-
-local MouseLockController = select(2, xpcall(function()
-	return require(playerScripts.PlayerModule.CameraModule.MouseLockController)
-end, function()
-	warn("Could not get PlayerModule.CameraModule.MouseLockController, camera offset will use the default defined in DEFAULT_CAMERA_OFFSET.")
-end))
+local humanoid: Humanoid?
+local currentCamera: Camera? = workspace.CurrentCamera
 
 local gui = script.Parent
 local shiftlockButton = gui.Button
 
-local humanoid: Humanoid?
+local shiftlockActive = false
+local inFirstPerson = nil -- nil to allow first-time update
 
 local function characterAdded(character: Model)
 	humanoid = character:WaitForChild("Humanoid") :: Humanoid
@@ -47,6 +45,23 @@ localPlayer.CharacterRemoving:Connect(function()
 	humanoid = nil
 end)
 
+-- Update currentCamera variable
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	currentCamera = workspace.CurrentCamera
+end)
+
+--[[
+	Returns the distance from the camera's CFrame and the camera's Focus.
+	Returns 0 if there is no CurrentCamera.
+]]
+local function getZoomDistance()
+	if not currentCamera then
+		return 0
+	end
+	
+	return (currentCamera.CFrame.Position - currentCamera.Focus.Position).Magnitude
+end
+
 --[[
 	Returns a boolean indicating whether shiftlock is available.
 ]]
@@ -55,30 +70,72 @@ local function isShiftLockAvailable()
 end
 
 --[[
-	Returns a boolean indicating whether shiftlock is active.
+	Updates shiftlock button image based on shiftlock state.
 ]]
-local function isShiftLockActive()
-	return UserGameSettings.RotationType == Enum.RotationType.CameraRelative
+local function updateImage()
+	shiftlockButton.Image = if shiftlockActive then ON_ICON_ASSETURL else OFF_ICON_ASSETURL
 end
 
 --[[
-	Enables or disables shiftlock.
+	Updates the Humanoid CameraOffset.
 ]]
-local function enableShiftLock(enable: boolean?)
+local function updateCameraOffset()
+	if not shiftlockActive then
+		inFirstPerson = nil
+		humanoid.CameraOffset = Vector3.zero
+		return
+	end
+	
+	local nowInFirstPerson = getZoomDistance() < FIRST_PERSON_DISTANCE_THRESHOLD
+	
+	-- Optimization: only update camera offset when first person changes
+	if nowInFirstPerson ~= inFirstPerson and humanoid then
+		humanoid.CameraOffset = if nowInFirstPerson then Vector3.zero else DEFAULT_CAMERA_OFFSET
+	end
+	
+	inFirstPerson = nowInFirstPerson
+end
+
+local cameraOffsetUpdateConnection: RBXScriptConnection?
+
+--[[
+	Enables/disables shiftlock.
+]]
+local function enableShiftLock(enable: boolean)
+	shiftlockActive = enable
+	
 	if enable then
 		UserGameSettings.RotationType = Enum.RotationType.CameraRelative
-
-		if humanoid then
-			humanoid.CameraOffset = if MouseLockController and MouseLockController.GetMouseLockOffset
-				then MouseLockController:GetMouseLockOffset()
-				else DEFAULT_CAMERA_OFFSET
+		
+		-- Update camera offset every frame
+		if not cameraOffsetUpdateConnection then
+			cameraOffsetUpdateConnection = RunService.PreRender:Connect(updateCameraOffset)
 		end
 	else
 		UserGameSettings.RotationType = Enum.RotationType.MovementRelative
-
-		if humanoid then
-			humanoid.CameraOffset = Vector3.zero
+		
+		-- Stop updating camera offset
+		if cameraOffsetUpdateConnection then
+			cameraOffsetUpdateConnection:Disconnect()
+			cameraOffsetUpdateConnection = nil
 		end
+		
+		updateCameraOffset()
+	end
+	
+	updateImage()
+end
+
+--[[
+	Updates the gui visibility based on whether the user's PreferredInput is Touch and if shiftlock is available.
+]]
+local function updateGuiVisibility()
+	local shouldBeVisible = isShiftLockAvailable() and UserInputService.PreferredInput == Enum.PreferredInput.Touch
+	gui.Enabled = shouldBeVisible
+	
+	if not shouldBeVisible and shiftlockActive then
+		-- Prevent the player from getting stuck in shiftlock
+		enableShiftLock(false)
 	end
 end
 
@@ -90,46 +147,13 @@ shiftlockButton.Activated:Connect(function()
 	end
 	
 	-- Toggle shiftlock
-	enableShiftLock(not isShiftLockActive())
+	enableShiftLock(not shiftlockActive)
 end)
-
---[[
-	Updates shiftlock button image based on RotationType.
-]]
-local function updateImage()
-	shiftlockButton.Image = if isShiftLockActive() then ON_ICON_ASSETURL else OFF_ICON_ASSETURL
-end
-
-local rotationTypeChanged: RBXScriptConnection?
-
---[[
-	Updates the gui visibility based on whether the user's PreferredInput is Touch and if shiftlock is available.
-]]
-local function updateGuiVisibility()
-	local enableNow = isShiftLockAvailable() and UserInputService.PreferredInput == Enum.PreferredInput.Touch
-	gui.Enabled = enableNow
-	
-	if enableNow then
-		rotationTypeChanged = UserGameSettings:GetPropertyChangedSignal("RotationType"):Connect(updateImage)
-		updateImage()
-	else
-		if rotationTypeChanged then
-			-- Disconnect the RotationType PropertyChangedSignal connection when gui isn't visible
-			rotationTypeChanged:Disconnect()
-			rotationTypeChanged = nil
-		end
-		
-		-- Prevent the player from getting stuck in shiftlock
-		if isShiftLockActive() then
-			enableShiftLock(false)
-		end
-	end
-end
-
-updateGuiVisibility()
 
 -- Update gui visibility on PreferredInput change
 UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(updateGuiVisibility)
 
--- Update gui visibility and shiftlock on DevEnableMouseLock change
+-- Update gui visibility on DevEnableMouseLock change
 localPlayer:GetPropertyChangedSignal("DevEnableMouseLock"):Connect(updateGuiVisibility)
+
+updateGuiVisibility()
