@@ -9,13 +9,15 @@
 		https://github.com/Nowoshire/Roblox-Mobile-Shiftlock/blob/main/LICENSE
 ]]
 
---!nonstrict
+--!strict
 
+-- Constants --
 local FIRST_PERSON_DISTANCE_THRESHOLD = 1 -- Distance from subject that is considered first person, value from PlayerModule
 local OFF_ICON_ASSETURL = "rbxasset://textures/ui/mouseLock_off@2x.png"
 local ON_ICON_ASSETURL = "rbxasset://textures/ui/mouseLock_on@2x.png"
 local DEFAULT_CAMERA_OFFSET = Vector3.new(1.75, 0, 0) -- Camera offset in Shiftlock, value from PlayerModule
 
+-- Services --
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -27,9 +29,10 @@ local currentCamera: Camera? = workspace.CurrentCamera
 
 local gui = script.Parent
 local shiftlockButton = gui.Button
+local shiftlockAction = gui.ShiftlockAction
 
-local shiftlockActive = false
-local inFirstPerson = nil -- nil to allow first-time update
+local isShiftlockActive: boolean = false
+local inFirstPerson: boolean? = nil -- nil to allow first-time update
 
 local function characterAdded(character: Model)
 	humanoid = character:WaitForChild("Humanoid") :: Humanoid
@@ -73,16 +76,20 @@ end
 	Updates shiftlock button image based on shiftlock state.
 ]]
 local function updateImage()
-	shiftlockButton.Image = if shiftlockActive then ON_ICON_ASSETURL else OFF_ICON_ASSETURL
+	shiftlockButton.Image = if isShiftlockActive then ON_ICON_ASSETURL else OFF_ICON_ASSETURL
 end
 
 --[[
 	Updates the Humanoid CameraOffset.
 ]]
 local function updateCameraOffset()
-	if not shiftlockActive then
+	if not isShiftlockActive then
 		inFirstPerson = nil
-		humanoid.CameraOffset = Vector3.zero
+		
+		if humanoid then
+			humanoid.CameraOffset = Vector3.zero
+		end
+		
 		return
 	end
 	
@@ -102,7 +109,7 @@ local cameraOffsetUpdateConnection: RBXScriptConnection?
 	Enables/disables shiftlock.
 ]]
 local function enableShiftLock(enable: boolean)
-	shiftlockActive = enable
+	isShiftlockActive = enable
 	
 	if enable then
 		UserGameSettings.RotationType = Enum.RotationType.CameraRelative
@@ -130,24 +137,29 @@ end
 	Updates the gui visibility based on whether the user's PreferredInput is Touch and if shiftlock is available.
 ]]
 local function updateGuiVisibility()
-	local shouldBeVisible = isShiftLockAvailable() and UserInputService.PreferredInput == Enum.PreferredInput.Touch
+	local shouldBeVisible = isShiftLockAvailable() and UserInputService.PreferredInput ~= Enum.PreferredInput.KeyboardAndMouse
 	gui.Enabled = shouldBeVisible
 	
-	if not shouldBeVisible and shiftlockActive then
+	if not shouldBeVisible and isShiftlockActive then
 		-- Prevent the player from getting stuck in shiftlock
 		enableShiftLock(false)
 	end
 end
 
--- Change shiftlock state on button activation
-shiftlockButton.Activated:Connect(function()
+-- Change shiftlock state on action trigger
+shiftlockAction.StateChanged:Connect(function(value)
+	-- Check if state is keydown
+	if not value then
+		return
+	end
+	
 	-- Check if shiftlock is available
 	if not isShiftLockAvailable() then
 		return
 	end
 	
 	-- Toggle shiftlock
-	enableShiftLock(not shiftlockActive)
+	enableShiftLock(not isShiftlockActive)
 end)
 
 -- Update gui visibility on PreferredInput change
@@ -156,4 +168,4 @@ UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(updateGuiVis
 -- Update gui visibility on DevEnableMouseLock change
 localPlayer:GetPropertyChangedSignal("DevEnableMouseLock"):Connect(updateGuiVisibility)
 
-updateGuiVisibility()
+updateGuiVisibility() -- initial update
